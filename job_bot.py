@@ -45,26 +45,26 @@ def get_api_keys():
 
 def build_job_prompt():
     return (
-        "Search Google for brand new job openings in Tamil Nadu, India posted TODAY or in the LAST 24 HOURS. "
-        "Search across these portals: Naukri.com, Indeed.in, LinkedIn.com, Shine.com, "
-        "Timesjobs.com, Glassdoor.in, Fresherworld.com. "
-        "Focus on cities: Chennai, Coimbatore, Madurai, Trichy, Salem, Tiruppur, Vellore, Erode, Thanjavur.\n\n"
+        "Find brand new job openings in Tamil Nadu, India for cities: Chennai, Coimbatore, Madurai, Trichy, Salem, Tiruppur, Vellore, Erode.\n"
+        "Search across portals: Naukri.com, Indeed.in, LinkedIn.com, Shine.com, Glassdoor.in, Fresherworld.com.\n\n"
         "IMPORTANT INSTRUCTIONS:\n"
-        "- Find 10 to 20 REAL, freshly posted job listings with actual company names and direct application URLs.\n"
-        "- Do NOT make up or hallucinate jobs. Only include genuine jobs found in search results.\n"
-        "- Include only jobs where you can extract a direct link to apply or view job details.\n"
-        "- Pick individual job listing URLs rather than search results landing pages.\n"
+        "- Find 10 to 20 REAL job listings with actual company names, locations, and direct application URLs.\n"
+        "- Do NOT make up or hallucinate jobs. Only include genuine jobs.\n"
+        "- Include only jobs where you can provide a link to apply or view job details.\n"
         "- Classify each job into ONE category: IT & Software | Engineering & Manufacturing | "
         "Healthcare & Pharma | Sales & Marketing | Finance & Banking | Govt & PSU | Others\n\n"
         "Return your answer as a JSON object ONLY. Do not include any explanation or text outside the JSON.\n"
         "Format:\n"
         '{"jobs":[{"title":"Software Engineer","company":"TCS","location":"Chennai",'
-        '"link":"https://...","job_type":"IT & Software","requirements":"3+ years Java experience","salary":"8-12 LPA"}]}'
+        '"link":"https://www.naukri.com/job-listings","job_type":"IT & Software","requirements":"3+ years Java experience","salary":"8-12 LPA"}]}'
     )
 
-# ─── GEMINI CALL WITH MULTI-KEY & BACKOFF ─────────────────────
+# ─── GEMINI CALL WITH MULTI-KEY & GROUNDING FALLBACK ─────────
 def call_gemini(model, api_key, prompt):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+    headers = {"Content-Type": "application/json"}
+
+    # Attempt 1: With Google Search grounding tool
     payload = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "tools": [{"googleSearch": {}}]
@@ -72,7 +72,6 @@ def call_gemini(model, api_key, prompt):
     if "-thinking" in model:
         payload["generationConfig"] = {"thinkingConfig": {"thinkingBudget": 2048}}
 
-    headers = {"Content-Type": "application/json"}
     req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers=headers)
     
     try:
@@ -80,22 +79,15 @@ def call_gemini(model, api_key, prompt):
             data = json.loads(resp.read().decode('utf-8'))
             parts = data['candidates'][0]['content']['parts']
             return parts[0]['text']
-    except urllib.error.HTTPError as e:
-        body = e.read().decode('utf-8', errors='ignore')
-        if "googleSearch" in body or "UNKNOWN" in body:
-            payload["tools"] = [{"google_search": {}}]
-            req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers=headers)
-            with urllib.request.urlopen(req) as resp:
-                data = json.loads(resp.read().decode('utf-8'))
-                return data['candidates'][0]['content']['parts'][0]['text']
-        elif "tools" in body or "grounding" in body:
+    except Exception as e:
+        # Fallback: Retry WITHOUT grounding tool (handles Search Tool 429 Quota limits)
+        if "tools" in payload:
             del payload["tools"]
-            req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers=headers)
-            with urllib.request.urlopen(req) as resp:
-                data = json.loads(resp.read().decode('utf-8'))
-                return data['candidates'][0]['content']['parts'][0]['text']
-        else:
-            raise Exception(f"HTTP {e.code}: {body[:200]}")
+        req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers=headers)
+        with urllib.request.urlopen(req) as resp:
+            data = json.loads(resp.read().decode('utf-8'))
+            parts = data['candidates'][0]['content']['parts']
+            return parts[0]['text']
 
 def fetch_jobs_via_gemini():
     api_keys = get_api_keys()
