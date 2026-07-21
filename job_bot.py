@@ -1,3 +1,4 @@
+import sys
 import os
 import re
 import json
@@ -6,6 +7,12 @@ import hashlib
 import urllib.parse
 import urllib.request
 import requests
+
+# Ensure UTF-8 stdout encoding across all OS environments
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 # ─── CONFIGURATION ───────────────────────────────────────────
 DEFAULT_MODELS = [
@@ -75,14 +82,12 @@ def call_gemini(model, api_key, prompt):
             return parts[0]['text']
     except urllib.error.HTTPError as e:
         body = e.read().decode('utf-8', errors='ignore')
-        # If googleSearch format failed, retry with google_search
         if "googleSearch" in body or "UNKNOWN" in body:
             payload["tools"] = [{"google_search": {}}]
             req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers=headers)
             with urllib.request.urlopen(req) as resp:
                 data = json.loads(resp.read().decode('utf-8'))
                 return data['candidates'][0]['content']['parts'][0]['text']
-        # If tools unsupported, fallback to no tools
         elif "tools" in body or "grounding" in body:
             del payload["tools"]
             req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers=headers)
@@ -95,31 +100,31 @@ def call_gemini(model, api_key, prompt):
 def fetch_jobs_via_gemini():
     api_keys = get_api_keys()
     if not api_keys:
-        print("❌ No GEMINI_API_KEY environment variables found.")
+        print("[ERROR] No GEMINI_API_KEY environment variables found.")
         return None
 
     prompt = build_job_prompt()
 
     for k_idx, key in enumerate(api_keys):
-        print(f"🔑 Trying API Key index {k_idx} ({key[:8]}...)")
+        print(f"[INFO] Trying API Key index {k_idx} ({key[:8]}...)")
         for model in DEFAULT_MODELS:
-            print(f"🤖 Trying model: {model}")
+            print(f"[INFO] Trying model: {model}")
             for attempt in range(1, 4):
                 try:
                     res = call_gemini(model, key, prompt)
-                    print(f"✅ Success with model {model} on attempt {attempt}")
+                    print(f"[SUCCESS] Model {model} succeeded on attempt {attempt}")
                     return res
                 except Exception as e:
                     err_str = str(e)
-                    print(f"⚠️ Model {model} (Attempt {attempt}) failed: {err_str[:120]}")
+                    print(f"[WARNING] Model {model} (Attempt {attempt}) failed: {err_str[:120]}")
                     if any(code in err_str for code in ['429', '503', '500']):
                         if attempt < 3:
                             sleep_time = attempt * 2
-                            print(f"⏳ Rate limited/Busy. Sleeping {sleep_time}s...")
+                            print(f"[SLEEP] Sleeping {sleep_time}s for rate limit...")
                             time.sleep(sleep_time)
                             continue
                     break
-    print("❌ All Gemini API Keys & Models exhausted.")
+    print("[ERROR] All Gemini API Keys & Models exhausted.")
     return None
 
 def parse_jobs_json(text):
@@ -141,7 +146,7 @@ def parse_jobs_json(text):
         elif isinstance(data, list):
             return data
     except Exception as e:
-        print(f"❌ Failed to parse JSON: {e}")
+        print(f"[ERROR] Failed to parse JSON: {e}")
     return []
 
 # ─── DEDUPLICATION & HASHING ──────────────────────────────────
@@ -149,7 +154,6 @@ def clean_url(url_str):
     if not url_str:
         return ''
     parsed = urllib.parse.urlparse(url_str)
-    # Strip query parameters & trailing slashes
     clean = f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip('/')
     return clean
 
@@ -199,7 +203,7 @@ def deduplicate_jobs(jobs):
                 new_hashes.append(link_hash)
             new_hashes.append(combo_hash)
         else:
-            print(f"🚫 Suppressed duplicate: {title} at {company}")
+            print(f"[SUPPRESSED] Duplicate job: {title} at {company}")
 
     if new_jobs:
         updated = existing_hashes + new_hashes
@@ -279,9 +283,9 @@ def send_to_telegram(bot_token, chat_id, text):
         }
         res = requests.post(url, json=payload, timeout=30)
         if res.status_code != 200:
-            print(f"❌ Telegram Error {res.status_code}: {res.text[:200]}")
+            print(f"[ERROR] Telegram Error {res.status_code}: {res.text[:200]}")
         else:
-            print("✅ Broadcasted job chunk to Telegram successfully.")
+            print("[SUCCESS] Broadcasted job chunk to Telegram successfully.")
 
 # ─── MAIN ENTRYPOINT ──────────────────────────────────────────
 def main():
@@ -289,30 +293,30 @@ def main():
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
 
     if not bot_token or not chat_id:
-        print("❌ TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID missing in environment.")
+        print("[ERROR] TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID missing in environment.")
         return
 
-    print("🚀 Starting 10-Minute Job Fetch Cycle via GitHub Actions...")
+    print("[INFO] Starting 10-Minute Job Fetch Cycle via GitHub Actions...")
     raw_response = fetch_jobs_via_gemini()
     if not raw_response:
-        print("❌ Gemini returned no data.")
+        print("[ERROR] Gemini returned no data.")
         return
 
     jobs = parse_jobs_json(raw_response)
-    print(f"📋 Fetched raw jobs: {len(jobs)}")
+    print(f"[INFO] Fetched raw jobs: {len(jobs)}")
     if not jobs:
-        print("ℹ️ No job listings parsed.")
+        print("[INFO] No job listings parsed.")
         return
 
     new_jobs = deduplicate_jobs(jobs)
-    print(f"✅ New unique jobs after deduplication: {len(new_jobs)}")
+    print(f"[INFO] New unique jobs after deduplication: {len(new_jobs)}")
     if not new_jobs:
-        print("ℹ️ All jobs were previously posted. Skipping broadcast.")
+        print("[INFO] All jobs were previously posted. Skipping broadcast.")
         return
 
     message = format_message(new_jobs)
     send_to_telegram(bot_token, chat_id, message)
-    print("🎉 Job cycle completed successfully.")
+    print("[SUCCESS] Job cycle completed successfully.")
 
 if __name__ == '__main__':
     main()
