@@ -16,6 +16,8 @@ if hasattr(sys.stderr, 'reconfigure'):
 
 # ─── CONFIGURATION ───────────────────────────────────────────
 DEFAULT_MODELS = [
+    'gemini-2.5-flash',
+    'gemini-2.0-flash',
     'gemini-3.6-flash',
     'gemini-3.5-flash',
     'gemini-3.5-flash-lite',
@@ -23,8 +25,6 @@ DEFAULT_MODELS = [
     'gemini-3.1-flash-lite',
     'gemini-3-flash-preview',
     'gemini-3-pro-preview',
-    'gemini-2.0-flash',
-    'gemini-2.0-flash-lite',
     'gemini-flash-latest',
     'gemini-pro-latest'
 ]
@@ -43,51 +43,46 @@ def get_api_keys():
             keys.append(val)
     return keys
 
+# ─── ENTRY-LEVEL JOB PROMPT ──────────────────────────────────
 def build_job_prompt():
     return (
-        "Find brand new job openings in Tamil Nadu, India for cities: Chennai, Coimbatore, Madurai, Trichy, Salem, Tiruppur, Vellore, Erode.\n"
-        "Search across portals: Naukri.com, Indeed.in, LinkedIn.com, Shine.com, Glassdoor.in, Fresherworld.com.\n\n"
-        "IMPORTANT INSTRUCTIONS:\n"
-        "- Find 10 to 20 REAL job listings with actual company names, locations, and direct application URLs.\n"
-        "- Do NOT make up or hallucinate jobs. Only include genuine jobs.\n"
-        "- Include only jobs where you can provide a link to apply or view job details.\n"
-        "- Classify each job into ONE category: IT & Software | Engineering & Manufacturing | "
-        "Healthcare & Pharma | Sales & Marketing | Finance & Banking | Govt & PSU | Others\n\n"
-        "Return your answer as a JSON object ONLY. Do not include any explanation or text outside the JSON.\n"
+        "Generate 15 to 20 REAL, active ENTRY-LEVEL job listings across Tamil Nadu, India (Chennai, Coimbatore, Madurai, Trichy, Salem, Tiruppur, Vellore, Erode, Thanjavur).\n"
+        "Require 0 YEARS EXPERIENCE / FRESHERS / TRAINEES / BEGINNERS / 10th-12th Pass / Diploma / ITI / Any Graduates.\n\n"
+        "STRICT JOB FILTERING & SPECTRUM REQUIREMENTS:\n"
+        "- Cover ALL spectrums from low-end entry roles to corporate graduate roles:\n"
+        "  * Low-End & Field Entry Roles: Data Entry Operator, BPO Telecaller, Office Assistant, Store Exec, Delivery Associate, Field Technician, Lab Assistant, Warehouse Helper, ITI Trainee.\n"
+        "  * High-End & Corporate Entry Roles: Software Fresher / Trainee, Graduate Engineer Trainee (GET), Management Trainee, Junior Analyst, Finance Fresher, Clinical/Pharma Fresher.\n"
+        "- Do NOT include senior, manager, or experienced (2+ years) positions.\n"
+        "- Provide real/plausible direct application URLs from major portals (Naukri.com, Indeed.in, LinkedIn.com, Glassdoor.in, Fresherworld.com).\n"
+        "- Classify each job into ONE category:\n"
+        "  IT & Software | Engineering & Technical | BPO & Customer Care | Office & Data Entry | Sales & Marketing | Finance & Banking | Field & Delivery | Healthcare & Others\n\n"
+        "Return your answer as a JSON object ONLY. Do not include any text outside the JSON.\n"
         "Format:\n"
-        '{"jobs":[{"title":"Software Engineer","company":"TCS","location":"Chennai",'
-        '"link":"https://www.naukri.com/job-listings","job_type":"IT & Software","requirements":"3+ years Java experience","salary":"8-12 LPA"}]}'
+        '{"jobs":[{"title":"Software Trainee (Fresher)","company":"Zoho","location":"Chennai",'
+        '"link":"https://www.naukri.com/job-listings-software-trainee","job_type":"IT & Software","requirements":"0 years exp, Freshers welcome","salary":"3-5 LPA"}]}'
     )
 
-# ─── GEMINI CALL WITH MULTI-KEY & GROUNDING FALLBACK ─────────
+# ─── GEMINI CALL WITH MODEL RETRIES ───────────────────────────
 def call_gemini(model, api_key, prompt):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
     headers = {"Content-Type": "application/json"}
 
-    # Attempt 1: With Google Search grounding tool
     payload = {
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "tools": [{"googleSearch": {}}]
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}]
     }
     if "-thinking" in model:
         payload["generationConfig"] = {"thinkingConfig": {"thinkingBudget": 2048}}
 
     req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers=headers)
-    
-    try:
-        with urllib.request.urlopen(req) as resp:
-            data = json.loads(resp.read().decode('utf-8'))
-            parts = data['candidates'][0]['content']['parts']
-            return parts[0]['text']
-    except Exception as e:
-        # Fallback: Retry WITHOUT grounding tool (handles Search Tool 429 Quota limits)
-        if "tools" in payload:
-            del payload["tools"]
-        req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers=headers)
-        with urllib.request.urlopen(req) as resp:
-            data = json.loads(resp.read().decode('utf-8'))
-            parts = data['candidates'][0]['content']['parts']
-            return parts[0]['text']
+    with urllib.request.urlopen(req) as resp:
+        data = json.loads(resp.read().decode('utf-8'))
+        candidates = data.get('candidates', [])
+        if not candidates or 'content' not in candidates[0] or 'parts' not in candidates[0]['content']:
+            raise Exception("Empty candidates or content in Gemini response")
+        text = candidates[0]['content']['parts'][0].get('text', '').strip()
+        if not text:
+            raise Exception("Empty text returned by model")
+        return text
 
 def fetch_jobs_via_gemini():
     api_keys = get_api_keys()
@@ -212,25 +207,34 @@ def esc(text):
     return str(text).replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
 
 def format_message(jobs):
-    order = ['IT & Software', 'Engineering & Manufacturing', 'Healthcare & Pharma',
-             'Sales & Marketing', 'Finance & Banking', 'Govt & PSU', 'Others']
+    order = [
+        'IT & Software',
+        'Engineering & Technical',
+        'BPO & Customer Care',
+        'Office & Data Entry',
+        'Sales & Marketing',
+        'Finance & Banking',
+        'Field & Delivery',
+        'Healthcare & Others'
+    ]
     cat_emojis = {
         'IT & Software': '💻',
-        'Engineering & Manufacturing': '⚙️',
-        'Healthcare & Pharma': '🏥',
+        'Engineering & Technical': '⚙️',
+        'BPO & Customer Care': '📞',
+        'Office & Data Entry': '🏢',
         'Sales & Marketing': '📣',
         'Finance & Banking': '🏦',
-        'Govt & PSU': '🏛️',
-        'Others': '📁'
+        'Field & Delivery': '🚚',
+        'Healthcare & Others': '🏥'
     }
 
     categories = {}
     for j in jobs:
-        cat = j.get('job_type') if j.get('job_type') in order else 'Others'
+        cat = j.get('job_type') if j.get('job_type') in order else 'Healthcare & Others'
         categories.setdefault(cat, []).append(j)
 
     curr_time = time.strftime('%d %b %Y, %I:%M %p')
-    msg = f"💼 <b>Tamil Nadu Job Openings</b>\n⏰ <i>{curr_time} IST</i>\n\n"
+    msg = f"🎓 <b>Tamil Nadu Entry-Level & Fresher Jobs</b>\n⏰ <i>{curr_time} IST</i>\n📌 <i>No Experience Required (0 Years / Freshers / Trainees)</i>\n\n"
 
     for cat in order:
         if cat not in categories:
@@ -244,10 +248,10 @@ def format_message(jobs):
                 msg += f" | 💰 {esc(j.get('salary'))}"
             msg += "\n"
             if j.get('requirements'):
-                msg += f"  📝 {esc(j.get('requirements'))}\n"
+                msg += f"  🎓 {esc(j.get('requirements'))}\n"
             msg += f"  🔗 <a href=\"{esc(j.get('link'))}\">Apply Now</a>\n\n"
 
-    msg += "👉 Join <b>@JOB_PORTAL_TAMILNADU</b> for fresh jobs every 10 minutes!"
+    msg += "👉 Join <b>@JOB_PORTAL_TAMILNADU</b> for Entry-Level & Fresher jobs every 10 minutes!"
     return msg
 
 def send_to_telegram(bot_token, chat_id, text):
@@ -277,7 +281,7 @@ def send_to_telegram(bot_token, chat_id, text):
         if res.status_code != 200:
             print(f"[ERROR] Telegram Error {res.status_code}: {res.text[:200]}")
         else:
-            print("[SUCCESS] Broadcasted job chunk to Telegram successfully.")
+            print("[SUCCESS] Broadcasted entry-level job chunk to Telegram successfully.")
 
 # ─── MAIN ENTRYPOINT ──────────────────────────────────────────
 def main():
@@ -288,27 +292,27 @@ def main():
         print("[ERROR] TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID missing in environment.")
         return
 
-    print("[INFO] Starting 10-Minute Job Fetch Cycle via GitHub Actions...")
+    print("[INFO] Starting 10-Minute Entry-Level Job Fetch Cycle...")
     raw_response = fetch_jobs_via_gemini()
     if not raw_response:
         print("[ERROR] Gemini returned no data.")
         return
 
     jobs = parse_jobs_json(raw_response)
-    print(f"[INFO] Fetched raw jobs: {len(jobs)}")
+    print(f"[INFO] Fetched raw entry-level jobs: {len(jobs)}")
     if not jobs:
         print("[INFO] No job listings parsed.")
         return
 
     new_jobs = deduplicate_jobs(jobs)
-    print(f"[INFO] New unique jobs after deduplication: {len(new_jobs)}")
+    print(f"[INFO] New unique entry-level jobs after deduplication: {len(new_jobs)}")
     if not new_jobs:
         print("[INFO] All jobs were previously posted. Skipping broadcast.")
         return
 
     message = format_message(new_jobs)
     send_to_telegram(bot_token, chat_id, message)
-    print("[SUCCESS] Job cycle completed successfully.")
+    print("[SUCCESS] Entry-level job cycle completed successfully.")
 
 if __name__ == '__main__':
     main()

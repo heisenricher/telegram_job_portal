@@ -1,6 +1,7 @@
 /**
- * TELEGRAM JOB PORTAL BOT - Google Apps Script Version (Optional)
- * For automated 10-minute runs via GitHub Actions, see job_bot.py and .github/workflows/job_bot.yml
+ * TELEGRAM ENTRY-LEVEL JOB PORTAL BOT - Tamil Nadu Jobs
+ * Channel: @JOB_PORTAL_TAMILNADU
+ * GitHub Repository: https://github.com/heisenricher/telegram_job_portal
  */
 
 var CONFIG = {
@@ -62,9 +63,9 @@ function parseJobsJson(rawText) {
 }
 
 function buildJobPrompt() {
-  return 'Search Google for brand new job openings in Tamil Nadu, India posted TODAY or in the LAST 24 HOURS. ' +
-         'Focus on cities: Chennai, Coimbatore, Madurai, Trichy, Salem, Tiruppur, Vellore, Erode, Thanjavur.\n\n' +
-         'Return answer as JSON object: {"jobs":[{"title":"...","company":"...","location":"...","link":"...","job_type":"IT & Software"}]}';
+  return 'Search Google for brand new ENTRY-LEVEL job openings in Tamil Nadu, India (0 years exp / Freshers / Trainees / Beginners / 10th-12th Pass / Graduates).\n' +
+         'Cover ALL spectrums from low-end (Data Entry, BPO, Office Assistant, Delivery, Retail Exec, Field Tech) to high-end (Software Fresher, GET, Management Trainee).\n' +
+         'Return answer as JSON object: {"jobs":[{"title":"...","company":"...","location":"...","link":"...","job_type":"IT & Software","requirements":"0 years exp"}]}';
 }
 
 function getApiKeys() {
@@ -135,7 +136,7 @@ function computeHash(str) {
 }
 
 function formatJobMessage(jobs) {
-  var msg = '💼 <b>Tamil Nadu Job Openings</b>\n\n';
+  var msg = '🎓 <b>Tamil Nadu Entry-Level & Fresher Jobs</b>\n📌 <i>No Experience Required</i>\n\n';
   jobs.forEach(function(j) {
     msg += '• <b>' + esc(j.title) + '</b> (' + esc(j.company) + ')\n';
     msg += '  🔗 <a href="' + esc(j.link) + '">Apply Now</a>\n\n';
