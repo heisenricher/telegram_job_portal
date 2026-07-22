@@ -9,9 +9,14 @@ on:
 jobs:
   run-job-bot:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # Grants write permissions to GITHUB_TOKEN for git push
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
